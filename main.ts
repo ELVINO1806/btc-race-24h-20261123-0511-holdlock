@@ -1,4 +1,6 @@
+
 // Entry B — hold-lock bot for make.fun btc-race-24h-20261123-0511.
+
 // Strategy (fixed spec): buy on the first tradable bar with all cash,
 // sell everything at +2% over the entry bar's open, rebuy with all cash
 // on a -0.8% dip from the close that triggered the last sell, repeat.
@@ -6,7 +8,9 @@
 // $1,000 starting capital. Decision thresholds use raw bar prices
 // (open/close), never fill prices (fills carry slippage and impact
 // that would shift the thresholds). All price comparisons use exact
+
 // bigint arithmetic.
+
 
 import { runBars } from './vendor/makefun-bars.ts';
 
@@ -96,8 +100,12 @@ await runBars({
       return [];
     }
 
+
     // 4. Holding: sell the whole position at +2% over the entry bar's
+
+
     // open (raw bar price, not the fill price).
+
     if (phase === 'holding' && entryPrice !== null) {
       const held = state.positions.get(SYMBOL);
       if (held === undefined || held.qty === 0n) {
@@ -127,9 +135,13 @@ await runBars({
       return [];
     }
 
+
     // 5. After a sale: rebuy with all cash on a -0.8% dip from the
+
     // close that triggered the last sell, then the same +2% sell rule
+
     // applies again.
+
     if (phase === 'waiting-dip' && lastSellPrice !== null) {
       if (close * DIP_DEN <= lastSellPrice * DIP_NUM) {
         if (state.cash > 0n) {
