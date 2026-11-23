@@ -1,9 +1,12 @@
 // Entry B — hold-lock bot for make.fun btc-race-24h-20261123-0511.
 // Strategy (fixed spec): buy on the first tradable bar with all cash,
-// sell everything at +2% over the entry fill price, rebuy with all cash
-// on a -0.8% dip from the last sell fill price, repeat. No stop-loss,
-// no trailing stop. Long only, CBBTC, 1-minute bars, $1,000 starting
-// capital. All price comparisons use exact bigint arithmetic.
+// sell everything at +2% over the entry bar's open, rebuy with all cash
+// on a -0.8% dip from the close that triggered the last sell, repeat.
+// No stop-loss, no trailing stop. Long only, CBBTC, 1-minute bars,
+// $1,000 starting capital. Decision thresholds use raw bar prices
+// (open/close), never fill prices (fills carry slippage and impact
+// that would shift the thresholds). All price comparisons use exact
+// bigint arithmetic.
 
 import { runBars } from './vendor/makefun-bars.ts';
 
@@ -48,15 +51,23 @@ await runBars({
               ? 'initial'
               : 'waiting-dip';
         } else if (fill.side === 'sell' && phase === 'awaiting-sell-fill') {
+          // No sale happened: void the provisional sell reference.
+          lastSellPrice = null;
           phase = 'holding';
         }
         continue;
       }
       if (fill.side === 'buy') {
-        entryPrice = BigInt(fill.price);
+        // Entry reference: the open of this batch's bar — the open the
+        // buy filled at — not the fill price (which carries slippage
+        // and impact and would shift the +2% threshold).
+        const bar = batch.bars.find((b) => b.symbol === SYMBOL);
+        entryPrice = bar === undefined ? BigInt(fill.price) : BigInt(bar.o);
         phase = 'holding';
       } else if (fill.side === 'sell') {
-        lastSellPrice = BigInt(fill.price);
+        // Keep lastSellPrice as the close recorded when the sell was
+        // decided; never overwrite it with the fill price.
+        if (lastSellPrice === null) lastSellPrice = BigInt(fill.price);
         entryPrice = null;
         phase = 'waiting-dip';
       }
@@ -85,7 +96,8 @@ await runBars({
       return [];
     }
 
-    // 4. Holding: sell the whole position at +2% over the entry fill.
+    // 4. Holding: sell the whole position at +2% over the entry bar's
+    // open (raw bar price, not the fill price).
     if (phase === 'holding' && entryPrice !== null) {
       const held = state.positions.get(SYMBOL);
       if (held === undefined || held.qty === 0n) {
@@ -97,8 +109,9 @@ await runBars({
         return [];
       }
       if (close * TP_DEN >= entryPrice * TP_NUM) {
-        // Provisional sell reference until the fill reports the real
-        // price; the fill handler overwrites it on the next batch.
+        // Record the sell reference now: the close that triggered
+        // this decision. The fill handler keeps it (it never
+        // overwrites it with the fill price).
         lastSellPrice = close;
         phase = 'awaiting-sell-fill';
         return [
@@ -114,8 +127,9 @@ await runBars({
       return [];
     }
 
-    // 5. After a sale: rebuy with all cash on a -0.8% dip from the last
-    // sell fill price, then the same +2% sell rule applies again.
+    // 5. After a sale: rebuy with all cash on a -0.8% dip from the
+    // close that triggered the last sell, then the same +2% sell rule
+    // applies again.
     if (phase === 'waiting-dip' && lastSellPrice !== null) {
       if (close * DIP_DEN <= lastSellPrice * DIP_NUM) {
         if (state.cash > 0n) {
